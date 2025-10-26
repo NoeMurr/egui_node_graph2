@@ -99,7 +99,7 @@ pub struct GraphNodeWidget<'a, NodeData, DataType, ValueType> {
     pub node_id: NodeId,
     pub ongoing_drag: Option<(NodeId, AnyParameterId)>,
     pub selected: bool,
-    pub pan: egui::Vec2,
+    pub pan: Vec2,
 }
 
 impl<NodeData, DataType, ValueType, NodeTemplate, UserResponse, UserState, CategoryType>
@@ -498,6 +498,7 @@ where
                 2.0,
                 bg_color,
                 Stroke::new(3.0, stroke_color),
+                StrokeKind::Outside,
             );
 
             self.selected_nodes = node_rects
@@ -542,7 +543,7 @@ where
         }
 
         // Deselect and deactivate finder if the editor background is clicked,
-        // *or* if the the mouse clicks off the ui
+        // *or* if the mouse clicks off the ui
         if click_on_background || (mouse.any_click() && !cursor_in_editor) {
             self.selected_nodes = Vec::new();
             self.node_finder = None;
@@ -573,7 +574,7 @@ fn draw_connection(
     dst_pos: Pos2,
     color: Color32,
 ) {
-    let connection_stroke = egui::Stroke {
+    let connection_stroke = Stroke {
         width: 5.0 * pan_zoom.zoom,
         color,
     };
@@ -617,11 +618,14 @@ where
         ui: &mut Ui,
         user_state: &mut UserState,
     ) -> Vec<NodeResponse<UserResponse, NodeData>> {
-        let mut child_ui = ui.child_ui_with_id_source(
-            Rect::from_min_size(*self.position + self.pan, Self::MAX_NODE_SIZE.into()),
-            Layout::default(),
-            self.node_id,
-            None,
+        let mut child_ui = ui.new_child(
+            UiBuilder::new()
+                .layout(Default::default())
+                .max_rect(Rect::from_min_size(
+                    *self.position + self.pan,
+                    Self::MAX_NODE_SIZE.into(),
+                ))
+                .id_salt(self.node_id),
         );
 
         Self::show_graph_node(self, pan_zoom, &mut child_ui, user_state)
@@ -635,7 +639,7 @@ where
         ui: &mut Ui,
         user_state: &mut UserState,
     ) -> Vec<NodeResponse<UserResponse, NodeData>> {
-        let margin = egui::vec2(15.0, 5.0) * pan_zoom.zoom;
+        let margin = vec2(15.0, 5.0) * pan_zoom.zoom;
         let mut responses = Vec::<NodeResponse<UserResponse, NodeData>>::new();
 
         let background_color;
@@ -666,7 +670,7 @@ where
         inner_rect.max.x = inner_rect.max.x.max(inner_rect.min.x);
         inner_rect.max.y = inner_rect.max.y.max(inner_rect.min.y);
 
-        let mut child_ui = ui.child_ui(inner_rect, *ui.layout(), None);
+        let mut child_ui = ui.new_child(UiBuilder::new().max_rect(inner_rect).layout(*ui.layout()));
 
         // Get interaction rect from memory, it may expand after the window response on resize.
         let interaction_rect = ui
@@ -756,8 +760,7 @@ where
                     let max_connections = self.graph[param_id]
                         .max_connections
                         .map(NonZeroU32::get)
-                        .unwrap_or(std::u32::MAX)
-                        as usize;
+                        .unwrap_or(u32::MAX) as usize;
                     let port_height = port_height(
                         max_connections != 1,
                         self.graph.connections(param_id).len(),
@@ -863,8 +866,7 @@ where
 
             let port_rect = Rect::from_center_size(
                 port_pos,
-                egui::vec2(10.0, port_height(wide_port, connections, max_connections))
-                    * pan_zoom.zoom,
+                vec2(10.0, port_height(wide_port, connections, max_connections)) * pan_zoom.zoom,
             );
 
             let port_full = connections == max_connections;
@@ -1014,7 +1016,7 @@ where
                 let max_connections = self.graph[*param]
                     .max_connections
                     .map(NonZeroU32::get)
-                    .unwrap_or(std::u32::MAX) as usize;
+                    .unwrap_or(u32::MAX) as usize;
                 draw_port(
                     pan_zoom,
                     ui,
@@ -1065,63 +1067,49 @@ where
 
         let (shape, outline) = {
             let rounding_radius = 4.0 * pan_zoom.zoom;
-            let rounding = Rounding::same(rounding_radius);
+            let rounding = CornerRadius::from(rounding_radius);
 
             let titlebar_height = title_height + margin.y;
             let titlebar_rect =
                 Rect::from_min_size(outer_rect.min, vec2(outer_rect.width(), titlebar_height));
-            let titlebar = Shape::Rect(RectShape {
-                rect: titlebar_rect,
-                rounding,
-                fill: self.graph[self.node_id]
-                    .user_data
-                    .titlebar_color(ui, self.node_id, self.graph, user_state)
-                    .unwrap_or_else(|| background_color.lighten(0.8)),
-                stroke: Stroke::NONE,
-                blur_width: 0.0,
-                fill_texture_id: Default::default(),
-                uv: Rect::ZERO,
-            });
+            let title_bar_color = self.graph[self.node_id]
+                .user_data
+                .titlebar_color(ui, self.node_id, self.graph, user_state)
+                .unwrap_or_else(|| background_color.lighten(0.8));
+
+            let titlebar = Shape::Rect(
+                RectShape::filled(titlebar_rect, rounding, title_bar_color)
+                    .with_texture(Default::default(), Rect::ZERO),
+            );
 
             let body_rect = Rect::from_min_size(
                 outer_rect.min + vec2(0.0, titlebar_height - rounding_radius),
                 vec2(outer_rect.width(), outer_rect.height() - titlebar_height),
             );
-            let body = Shape::Rect(RectShape {
-                rect: body_rect,
-                rounding: Rounding::ZERO,
-                fill: background_color,
-                stroke: Stroke::NONE,
-                blur_width: 0.0,
-                fill_texture_id: Default::default(),
-                uv: Rect::ZERO,
-            });
+            let body = Shape::Rect(
+                RectShape::filled(body_rect, CornerRadius::ZERO, background_color)
+                    .with_texture(Default::default(), Rect::ZERO),
+            );
 
             let bottom_body_rect = Rect::from_min_size(
                 body_rect.min + vec2(0.0, body_rect.height() - titlebar_height * 0.5),
                 vec2(outer_rect.width(), titlebar_height),
             );
-            let bottom_body = Shape::Rect(RectShape {
-                rect: bottom_body_rect,
-                rounding,
-                fill: background_color,
-                stroke: Stroke::NONE,
-                blur_width: 0.0,
-                fill_texture_id: Default::default(),
-                uv: Rect::ZERO,
-            });
+            let bottom_body = Shape::Rect(
+                RectShape::filled(bottom_body_rect, rounding, background_color)
+                    .with_texture(Default::default(), Rect::ZERO),
+            );
 
             let node_rect = titlebar_rect.union(body_rect).union(bottom_body_rect);
             let outline = if self.selected {
-                Shape::Rect(RectShape {
-                    rect: node_rect.expand(1.0 * pan_zoom.zoom),
-                    rounding,
-                    fill: Color32::WHITE.lighten(0.8),
-                    stroke: Stroke::NONE,
-                    blur_width: 0.0,
-                    fill_texture_id: Default::default(),
-                    uv: Rect::ZERO,
-                })
+                Shape::Rect(
+                    RectShape::filled(
+                        node_rect.expand(1.0 * pan_zoom.zoom),
+                        rounding,
+                        Color32::WHITE.lighten(0.8),
+                    )
+                    .with_texture(Default::default(), Rect::ZERO),
+                )
             } else {
                 Shape::Noop
             };
